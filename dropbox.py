@@ -2,6 +2,7 @@ import argparse
 import logging
 import math
 import os
+import sys
 import time
 import zipfile
 from datetime import timedelta
@@ -112,7 +113,7 @@ def downloadFile(suppliedLink: str, destination: str, unzip=False, retain_zip=Fa
             except OSError:
                 logger.error(f"Unable to remove {tempFilePath}")
                 pass
-            exit()
+            sys.exit(0)
 
         # print messaage when download is over
         if os.stat(tempFilePath).st_size == zipFileSize:
