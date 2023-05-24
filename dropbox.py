@@ -130,9 +130,9 @@ def downloadFile(suppliedLink: str, destination: str, unzip=False, retain_zip=Fa
             directoryPath = os.path.join(destination, directoryName)
             os.makedirs(directoryPath, exist_ok=True)
             zipFile.extractall(directoryPath)
-        
+
         logger.info(f"Extracted {filePath} to {directoryPath}")
-        
+
         # check if zip files should be deleted
         if not retain_zip:
             os.remove(filePath)
