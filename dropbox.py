@@ -119,7 +119,7 @@ def downloadFile(suppliedLink: str, destination: str, unzip=False, retain_zip=Fa
             os.rename(tempFilePath, filePath)
             elapsedTime = timedelta(seconds=time.time() - start_time)
             logger.info(
-                f"Downloaded {suppliedLink} to {destination}/{filePath} in"
+                f"Downloaded {suppliedLink} to {filePath} in"
                 f" {elapsedTime}"
             )
 
