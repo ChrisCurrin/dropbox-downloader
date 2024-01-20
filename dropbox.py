@@ -27,7 +27,7 @@ logger = logging.getLogger("dropbox-downloader")
 # helper function
 
 
-def formatBytes(bytes):
+def format_bytes(bytes):
     """function returns formatted bytes"""
     if bytes == 0:
         return "0B"
@@ -37,71 +37,91 @@ def formatBytes(bytes):
     return f"{formatted} {suffixes[index]}"
 
 
-def downloadFile(suppliedLink: str, destination: str, unzip=False, retain_zip=False):
-    parsedURL = urlparse(suppliedLink)
+def download_file(
+    link: str, destination: str | Path = ".", unzip=False, retain_zip=False
+):
+    parsed_URL = urlparse(link)
+    destination = Path(destination)
 
     # check if link belongs to www.dropbox.com
-    if not parsedURL.netloc == DOMAIN:
-        logger.error(f"{suppliedLink} does not belong to {DOMAIN}, skipping it ")
+    if not parsed_URL.netloc == DOMAIN:
+        logger.error(f"{link} does not belong to {DOMAIN}, skipping it ")
         return
 
-    # add query to make link downloadable as zip
-    zippedDownloadURL = urlunparse(parsedURL._replace(query="dl=1"))
-    logger.info(f"Downloading from URL : {suppliedLink}")
+    # add/edit query to make link downloadable as zip
+    query = parsed_URL.query
+    query = query.replace("dl=0", "dl=1")
+    if not query.endswith("dl=1"):
+        if query:
+            # multiple query parameters (non-empty query string)
+            query += "&"
+        query += "dl=1"
+    zipped_download_URL = urlunparse(parsed_URL._replace(query=query))
+    logger.info(f"Downloading from URL : {link}")
 
     with requests.Session() as session:
         session.mount("https://", HTTPAdapter(max_retries=RETRIES))
 
         try:
-            zipFileResp = session.get(
-                zippedDownloadURL,
+            zip_file_resp = session.get(
+                zipped_download_URL,
                 headers={"User-Agent": WGET_AGENT},
                 timeout=60,
                 stream=True,
             )
             start_time = time.time()
-            zipFileResp.raise_for_status()
+            zip_file_resp.raise_for_status()
 
         except requests.exceptions.ConnectionError:
-            logger.error(f"Unable to retrieve {suppliedLink}, due to network error")
+            logger.error(f"Unable to retrieve {link}, due to network error")
             return
 
         except requests.exceptions.Timeout:
-            logger.error(f"Unable to retrieve {suppliedLink}, connection timed out")
+            logger.error(f"Unable to retrieve {link}, connection timed out")
             return
 
         except requests.exceptions.HTTPError as err:
             logger.error(f"{err}")
             return
 
-        # get filename from response headers
-        zipFilename = (
-            zipFileResp.headers["content-disposition"].split(";")[1].split('"')[1]
-        )
-        # get file size from response headers
-        zipFileSize = float(zipFileResp.headers.get("content-length", 0))
-        formattedZipFileSize = formatBytes(zipFileSize)
-        # path to store the file
-        filePath = os.path.join(destination, zipFilename)
-        # path to store file with temporary filename
-        tempFilePath = os.path.join(destination, f"{zipFilename}.part")
-        Path(destination).mkdir(parents=True, exist_ok=True)
-        logger.info(f"Downloading file : {zipFilename}")
+        if len(destination.parts) == 1:
+            zip_file_name = str(destination)
+            destination = Path.cwd()  # current directory
+        else:
+            # get filename from response headers
+            try:
+                zip_file_name = (
+                    zip_file_resp.headers["content-disposition"]
+                    .split(";")[1]
+                    .split('"')[1]
+                )
+            except KeyError:
+                zip_file_name = "dropbox.zip"
 
-        currentSize = 0
+        # get file size from response headers
+        zip_file_size = float(zip_file_resp.headers.get("content-length", 0))
+        fmt_zip_file_size = format_bytes(zip_file_size)
+        # path to store the file
+        file_path = destination.resolve() / zip_file_name
+        # path to store file with temporary filename
+        temp_file_path = file_path.with_suffix(".part")
+        Path(destination).mkdir(parents=True, exist_ok=True)
+        logger.info(f"Downloading file : {zip_file_name}")
+
+        current_size = 0
         try:
             chunk_size = 2**20
-            with open(tempFilePath, "wb") as zipFile:  # write file to disk
+            with open(temp_file_path, "wb") as zipFile:  # write file to disk
                 for chunk in tqdm(
-                    zipFileResp.iter_content(chunk_size=chunk_size),
-                    total=math.ceil(zipFileSize // chunk_size),
+                    zip_file_resp.iter_content(chunk_size=chunk_size),
+                    total=math.ceil(zip_file_size // chunk_size),
                     unit="MB",
                     unit_scale=True,
-                    postfix=f"{formattedZipFileSize}",
-                    desc=f"{suppliedLink} -> {tempFilePath}",
+                    postfix=f"{fmt_zip_file_size}",
+                    desc=f"{link} -> {temp_file_path}",
                 ):
                     if chunk:
-                        currentSize += len(chunk)
+                        current_size += len(chunk)
                         zipFile.write(chunk)
                         # zipFile.flush()
                         # os.fsync(zipFile.fileno())
@@ -109,40 +129,37 @@ def downloadFile(suppliedLink: str, destination: str, unzip=False, retain_zip=Fa
         except KeyboardInterrupt:
             logger.error("Interrupted by user, removing incomplete file")
             try:
-                os.remove(tempFilePath)
+                os.remove(temp_file_path)
             except OSError:
-                logger.error(f"Unable to remove {tempFilePath}")
+                logger.error(f"Unable to remove {temp_file_path}")
                 pass
             sys.exit(0)
 
         # print messaage when download is over
-        if os.stat(tempFilePath).st_size == zipFileSize:
-            os.rename(tempFilePath, filePath)
-            elapsedTime = timedelta(seconds=time.time() - start_time)
-            logger.info(
-                f"Downloaded {suppliedLink} to {filePath} in"
-                f" {elapsedTime}"
-            )
+        if os.stat(temp_file_path).st_size == zip_file_size:
+            temp_file_path.replace(file_path)
+            elapsed_time = timedelta(seconds=time.time() - start_time)
+            logger.info(f"Downloaded {link} to {file_path} in" f" {elapsed_time}")
 
     # if unzip argument is used unzip files
     if unzip:
-        with zipfile.ZipFile(filePath, "r") as zipFile:
-            directoryName = zipFilename.replace(".zip", "")
-            directoryPath = os.path.join(destination, directoryName)
-            os.makedirs(directoryPath, exist_ok=True)
-            zipFile.extractall(directoryPath)
+        with zipfile.ZipFile(file_path, "r") as zipFile:
+            directory_name = zip_file_name.replace(".zip", "")
+            directory_path = destination / directory_name
+            directory_path.mkdir(parents=True, exist_ok=True)
+            zipFile.extractall(directory_path)
 
-        logger.info(f"Extracted {filePath} to {directoryPath}")
+        logger.info(f"Extracted {file_path} to {directory_path}")
 
         # check if zip files should be deleted
         if not retain_zip:
-            os.remove(filePath)
-            logger.info(f"Removed {filePath}")
+            os.remove(file_path)
+            logger.info(f"Removed {file_path}")
 
 
-def downloadFiles(suppliedLinks: list[str], destination, unzip=False, retain_zip=False):
-    for suppliedLink in suppliedLinks:
-        downloadFile(suppliedLink, destination, unzip, retain_zip)
+def download_files(links: list[str], destination, unzip=False, retain_zip=False):
+    for suppliedLink in links:
+        download_file(suppliedLink, destination, unzip, retain_zip)
 
 
 if __name__ == "__main__":
@@ -183,11 +200,11 @@ if __name__ == "__main__":
 
     if arguments.links:
         # convert the supplied links into list
-        suppliedLinks = list(dict.fromkeys(arguments.links))
+        links = list(dict.fromkeys(arguments.links))
     else:
         # read given file and add each line to list
         with arguments.read as file:
-            suppliedLinks = file.read().splitlines()
+            links = file.read().splitlines()
 
     # destination folder supplied by the user
     destination = arguments.dest
@@ -204,8 +221,8 @@ if __name__ == "__main__":
             )
 
     # download files
-    downloadFiles(
-        suppliedLinks,
+    download_files(
+        links,
         destination,
         unzip=arguments.unzip,
         retain_zip=arguments.retain_zip,

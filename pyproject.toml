@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dropbox"
-version = "0.5"
+version = "0.8"
 description = "python script to download publicly shared Dropbox folders into zip files"
 authors = ["Christopher Currin <chris.crisur@gmail.com>"]
 readme = "README.md"
