@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import sys
+import textwrap
 import time
 import zipfile
 from datetime import timedelta
@@ -57,14 +58,14 @@ def download_file(
             query += "&"
         query += "dl=1"
     zipped_download_URL = urlunparse(parsed_URL._replace(query=query))
-    logger.info(f"Downloading from URL : {link}")
+    logger.info(f"Downloading from URL : {zipped_download_URL}")
 
     with requests.Session() as session:
         session.mount("https://", HTTPAdapter(max_retries=RETRIES))
 
         try:
             zip_file_resp = session.get(
-                zipped_download_URL,
+                link.replace("dl=0", "dl=1"),
                 headers={"User-Agent": WGET_AGENT},
                 timeout=60,
                 stream=True,
@@ -102,11 +103,14 @@ def download_file(
         zip_file_size = float(zip_file_resp.headers.get("content-length", 0))
         fmt_zip_file_size = format_bytes(zip_file_size)
         # path to store the file
-        file_path = destination.resolve() / zip_file_name
+        file_path = (destination.resolve() / zip_file_name).with_suffix(".zip")
         # path to store file with temporary filename
-        temp_file_path = file_path.with_suffix(".part")
+        temp_file_path = file_path.with_suffix(".zip.part")
         Path(destination).mkdir(parents=True, exist_ok=True)
         logger.info(f"Downloading file : {zip_file_name}")
+
+        short_link = textwrap.shorten(zipped_download_URL, width=50, placeholder="...")
+        short_file_path = textwrap.shorten(str(temp_file_path), width=50, placeholder="...")
 
         current_size = 0
         try:
@@ -114,11 +118,11 @@ def download_file(
             with open(temp_file_path, "wb") as zipFile:  # write file to disk
                 for chunk in tqdm(
                     zip_file_resp.iter_content(chunk_size=chunk_size),
-                    total=math.ceil(zip_file_size // chunk_size),
+                    # total=math.ceil(zip_file_size // chunk_size),
                     unit="MB",
                     unit_scale=True,
                     postfix=f"{fmt_zip_file_size}",
-                    desc=f"{link} -> {temp_file_path}",
+                    desc=f"{short_link} -> {short_file_path}",
                 ):
                     if chunk:
                         current_size += len(chunk)
@@ -135,11 +139,11 @@ def download_file(
                 pass
             sys.exit(0)
 
-        # print messaage when download is over
-        if os.stat(temp_file_path).st_size == zip_file_size:
-            temp_file_path.replace(file_path)
-            elapsed_time = timedelta(seconds=time.time() - start_time)
-            logger.info(f"Downloaded {link} to {file_path} in" f" {elapsed_time}")
+    # print messaage when download is over
+    if os.stat(temp_file_path).st_size == zip_file_size:
+        temp_file_path.replace(file_path)
+        elapsed_time = timedelta(seconds=time.time() - start_time)
+        logger.info(f"Downloaded {link} to {file_path} in" f" {elapsed_time}")
 
     # if unzip argument is used unzip files
     if unzip:
